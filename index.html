@@ -307,6 +307,16 @@ JSON 必須包含以下欄位：
               SOP Auto-Gen Studio
             </div>
             <div className="controls-row">
+              <input 
+                type="password" 
+                placeholder="輸入Google Gemini API Key"
+                className="input-modern"
+                value={apiKey}
+                onChange={(e) => setApiKey(e.target.value)}
+              />
+              <button onClick={detectModels} title="偵測可用AI模型" className="icon-box" style={{ background: 'white', color: '#64748b', border: '1px solid #cbd5e1', cursor: 'pointer' }}>
+                <RefreshCw size={16} className={isDetecting ? 'spin' : ''} />
+              </button>
               <select 
                 className="select-modern"
                 value={modelName}
@@ -318,16 +328,6 @@ JSON 必須包含以下欄位：
                   <option value={DEFAULT_MODEL}>{DEFAULT_MODEL} (預設)</option>
                 )}
               </select>
-              <button onClick={detectModels} className="icon-box" style={{ background: 'white', color: '#64748b', border: '1px solid #cbd5e1', cursor: 'pointer' }}>
-                <RefreshCw size={16} className={isDetecting ? 'spin' : ''} />
-              </button>
-              <input 
-                type="password" 
-                placeholder="請貼上 Gemini API Key"
-                className="input-modern"
-                value={apiKey}
-                onChange={(e) => setApiKey(e.target.value)}
-              />
             </div>
           </header>
 
@@ -525,6 +525,10 @@ JSON 必須包含以下欄位：
               </div>
             </div>
           </main>
+
+          <footer style={{ textAlign: 'center', padding: '1.5rem', color: '#64748b', fontSize: '14px', fontWeight: '500' }}>
+            這個網頁開發屬於臺灣港務股份有限公司資訊處
+          </footer>
 
           <style>{`
             .spin { animation: spin 1s linear infinite; }
