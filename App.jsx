@@ -1,0 +1,518 @@
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { 
+  Upload, FileVideo, PlayCircle, Settings, Clipboard, Download, 
+  FileCode, MessageSquare, Lightbulb, Loader2, RefreshCw, 
+  Edit2, Check, X, ChevronDown, FileText, File
+} from 'lucide-react';
+import './App.css'; // 引入我們建立的高質感 Vanilla CSS
+
+const API_KEY_DEFAULT = ""; 
+const BASE_URL = "https://generativelanguage.googleapis.com/v1beta";
+const UPLOAD_URL = "https://generativelanguage.googleapis.com/upload/v1beta";
+const DEFAULT_MODEL = "gemini-2.5-flash-preview-09-2025";
+
+const FIXED_FORMAT_PROMPT = `
+【輸出格式】
+你必須僅回傳一個合法的 JSON 物件，不要包含任何 Markdown 標籤（如 \`\`\`json）。
+JSON 必須包含以下欄位：
+- process_name: 字串，SOP 名稱
+- trigger: 字串，起始條件
+- steps: 陣列，包含物件：
+  - timestamp: 數字，影片秒數 (請只給數字，不要加上 's')
+  - ui_element: 字串，涉及組件
+  - instruction: 字串，詳細步驟描述
+  - pro_tip: 字串，額外提示 (可為空)
+`;
+
+const SAMPLE_PROMPT = `你是一位精通台灣企業採購流程的操作手冊專家。請觀察影片內容並撰寫詳細 SOP。
+【防幻覺規則】
+1. 僅紀錄影片中實際發生的動作與檔案名稱（如採購單號、Excel 檔名）。
+2. 如果影片內容不符，嚴禁胡謅。
+3. 使用台灣地區常用正體中文與術語（軟體、儲存、設定、檔案、網路）。`;
+
+const App = () => {
+  const [apiKey, setApiKey] = useState("");
+  const [modelName, setModelName] = useState(DEFAULT_MODEL); 
+  const [availableModels, setAvailableModels] = useState([]);
+  const [isDetecting, setIsDetecting] = useState(false);
+  const [userPrompt, setUserPrompt] = useState("");
+  const [file, setFile] = useState(null);
+  const [videoPreview, setVideoPreview] = useState(null);
+  const [status, setStatus] = useState('idle'); // idle, uploading, processing, generating, completed, error
+  const [progress, setProgress] = useState(0);
+  const [result, setResult] = useState(null);
+  const [errorMessage, setErrorMessage] = useState("");
+  
+  // 影片控制參照
+  const videoRef = useRef(null);
+
+  // 編輯狀態
+  const [editingIndex, setEditingIndex] = useState(null);
+  const [editForm, setEditForm] = useState({ instruction: '', ui_element: '', pro_tip: '' });
+
+  const fillSamplePrompt = () => setUserPrompt(SAMPLE_PROMPT);
+
+  // --- 匯出功能模組 ---
+  const copyToClipboard = (text, type = "純文字") => {
+    navigator.clipboard.writeText(text).then(() => {
+      alert(`已複製 ${type} 到剪貼簿！`);
+    }).catch(err => {
+      console.error('複製失敗:', err);
+      alert('複製失敗，請手動複製。');
+    });
+  };
+
+  const generateMarkdown = (data) => {
+    if (!data || !data.steps) return "尚無數據可生成 Markdown。";
+    let md = `# ${data.process_name || '標準作業程序 (SOP)'}\n\n`;
+    md += `## 📋 流程概覽\n`;
+    md += `- **觸發條件**：${data.trigger || '未指定'}\n`;
+    md += `- **生成時間**：${new Date().toLocaleString('zh-TW')}\n\n`;
+    md += `## 🛠️ 執行步驟詳解\n\n`;
+    md += `| 步驟 | 影片時戳 | 涉及 UI 元件 | 操作指令描述 | 專家實務建議 |\n`;
+    md += `| :--- | :--- | :--- | :--- | :--- |\n`;
+    
+    data.steps.forEach((s, i) => {
+      const ts = typeof s.timestamp === 'number' ? \`\${s.timestamp}s\` : s.timestamp;
+      md += `| \${i + 1} | \${ts} | \${s.ui_element || '-'} | \${s.instruction || '-'} | \${s.pro_tip || '-'} |\n`;
+    });
+    
+    md += `\n\n---\n*本文件由 AI 錄影轉 SOP 系統自動生成*`;
+    return md;
+  };
+
+  const generatePlainText = (data) => {
+    if (!data || !data.steps) return "";
+    let text = `【${data.process_name}】\n觸發條件：${data.trigger}\n\n`;
+    data.steps.forEach((s, i) => {
+      const ts = typeof s.timestamp === 'number' ? \`\${s.timestamp}s\` : s.timestamp;
+      text += `步驟 ${i + 1} [${ts}]:\n操作: ${s.instruction}\n元件: ${s.ui_element}\n`;
+      if (s.pro_tip) text += `💡提示: ${s.pro_tip}\n`;
+      text += `\n`;
+    });
+    return text;
+  };
+
+  const downloadMarkdown = () => {
+    const content = generateMarkdown(result);
+    const blob = new Blob([content], { type: 'text/markdown' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `\${result?.process_name || 'SOP_Export'}.md`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  // --- 影片跳轉功能 ---
+  const handleSeek = (timestamp) => {
+    if (videoRef.current) {
+      const time = parseFloat(timestamp);
+      if (!isNaN(time)) {
+        videoRef.current.currentTime = time;
+        videoRef.current.play();
+      }
+    }
+  };
+
+  // --- 內聯編輯功能 ---
+  const startEdit = (e, index, step) => {
+    e.stopPropagation(); // 避免觸發跳轉
+    setEditingIndex(index);
+    setEditForm({
+      instruction: step.instruction || '',
+      ui_element: step.ui_element || '',
+      pro_tip: step.pro_tip || ''
+    });
+  };
+
+  const saveEdit = (e, index) => {
+    e.stopPropagation();
+    const newResult = { ...result };
+    newResult.steps[index] = {
+      ...newResult.steps[index],
+      instruction: editForm.instruction,
+      ui_element: editForm.ui_element,
+      pro_tip: editForm.pro_tip
+    };
+    setResult(newResult);
+    setEditingIndex(null);
+  };
+
+  const cancelEdit = (e) => {
+    e.stopPropagation();
+    setEditingIndex(null);
+  };
+
+  // --- API 邏輯 ---
+  const detectModels = useCallback(async () => {
+    const key = apiKey || API_KEY_DEFAULT;
+    if (!key) {
+      setErrorMessage("請先輸入 API Key 才能偵測模型。");
+      return;
+    }
+    setIsDetecting(true);
+    try {
+      const response = await fetch(`\${BASE_URL}/models?key=\${key}`);
+      const data = await response.json();
+      if (data.models) {
+        const models = data.models
+          .filter(m => m.supportedGenerationMethods.includes("generateContent"))
+          .map(m => m.name.replace("models/", ""));
+        setAvailableModels(models);
+        if (!models.includes(modelName)) {
+          const fallback = models.find(m => m.includes("flash")) || models[0];
+          setModelName(fallback);
+        }
+      } else if (data.error) {
+        throw new Error(data.error.message);
+      }
+    } catch (err) {
+      setErrorMessage(`偵測模型失敗: \${err.message}`);
+    } finally {
+      setIsDetecting(false);
+    }
+  }, [apiKey, modelName]);
+
+  const fetchWithRetry = async (url, options, retries = 5) => {
+    for (let i = 0; i < retries; i++) {
+      try {
+        const res = await fetch(url, options);
+        const data = await res.json();
+        if (res.ok) return data;
+        if ([429, 503, 500].includes(res.status) && i < retries - 1) {
+          const delay = Math.pow(2, i) * 1000;
+          await new Promise(r => setTimeout(r, delay));
+          continue;
+        }
+        throw { status: res.status, data };
+      } catch (err) { 
+        if (i === retries - 1) throw err; 
+        await new Promise(r => setTimeout(r, Math.pow(2, i) * 1000));
+      }
+    }
+  };
+
+  const handleFileChange = (e) => {
+    const selectedFile = e.target.files[0];
+    if (!selectedFile) return;
+    
+    // 嚴格限制僅限 mp4
+    if (selectedFile.type === 'video/mp4' || selectedFile.name.toLowerCase().endsWith('.mp4')) {
+      setFile(selectedFile);
+      setVideoPreview(URL.createObjectURL(selectedFile));
+      setStatus('idle');
+      setResult(null);
+      setErrorMessage("");
+    } else {
+      setErrorMessage("為了確保完美的影片時間軸連動體驗，請務必上傳 .mp4 格式的視訊檔案。");
+    }
+  };
+
+  const startWorkflow = async () => {
+    if (!file) return;
+    const currentKey = apiKey || API_KEY_DEFAULT;
+    const finalPrompt = `\${userPrompt.trim() || SAMPLE_PROMPT}\n\n\${FIXED_FORMAT_PROMPT}`;
+
+    setStatus('uploading');
+    setErrorMessage("");
+    setProgress(10);
+    
+    try {
+      const metadata = { file: { display_name: file.name } };
+      const formData = new FormData();
+      formData.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
+      formData.append('file', file);
+
+      const uploadData = await fetchWithRetry(`\${UPLOAD_URL}/files?key=\${currentKey}`, {
+        method: 'POST',
+        headers: { 'X-Goog-Upload-Protocol': 'multipart' },
+        body: formData
+      });
+      
+      const fileUri = uploadData.file.uri;
+      const fileName = uploadData.file.name;
+      
+      setStatus('processing');
+      let attempts = 0;
+      while (attempts < 60) {
+        const s = await fetch(`\${BASE_URL}/\${fileName}?key=\${currentKey}`).then(r => r.json());
+        if (s.state === 'ACTIVE') break;
+        else if (s.state === 'FAILED') throw new Error("視訊解析失敗，請確認檔案。");
+        await new Promise(r => setTimeout(r, 4000));
+        attempts++;
+        setProgress(Math.min(55, 30 + attempts * 0.5));
+      }
+
+      setStatus('generating');
+      setProgress(60);
+
+      const payload = {
+        contents: [{
+          parts: [
+            { fileData: { mimeType: file.type || "video/mp4", fileUri: fileUri } },
+            { text: "請分析此視訊內容並產出 SOP JSON。請精確對照視訊中的畫面動作與發生時間。" },
+          ]
+        }],
+        systemInstruction: { parts: [{ text: finalPrompt }] }, 
+        generationConfig: { responseMimeType: "application/json", temperature: 0.1 }
+      };
+
+      const genData = await fetchWithRetry(`\${BASE_URL}/models/\${modelName}:generateContent?key=\${currentKey}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+
+      const txt = genData.candidates?.[0]?.content?.parts?.[0]?.text;
+      if (txt) {
+        setResult(JSON.parse(txt));
+        setStatus('completed');
+        setProgress(100);
+      } else {
+        throw new Error("模型無回應內容。");
+      }
+    } catch (err) {
+      setStatus('error');
+      setErrorMessage(err.data?.error?.message || err.message || "分析過程中發生錯誤");
+    }
+  };
+
+  return (
+    <div>
+      <header className="glass-header">
+        <div className="header-title">
+          <div className="icon-box"><FileVideo size={24} /></div>
+          SOP Auto-Gen Studio
+        </div>
+        <div className="controls-row">
+          <select 
+            className="select-modern"
+            value={modelName}
+            onChange={(e) => setModelName(e.target.value)}
+          >
+            {availableModels.length > 0 ? (
+              availableModels.map(m => <option key={m} value={m}>{m}</option>)
+            ) : (
+              <option value={DEFAULT_MODEL}>{DEFAULT_MODEL} (預設)</option>
+            )}
+          </select>
+          <button onClick={detectModels} className="icon-box" style={{ background: 'white', color: '#64748b', border: '1px solid #cbd5e1', cursor: 'pointer' }}>
+            <RefreshCw size={16} className={isDetecting ? 'spin' : ''} />
+          </button>
+          <input 
+            type="password" 
+            placeholder="請貼上 Gemini API Key"
+            className="input-modern"
+            value={apiKey}
+            onChange={(e) => setApiKey(e.target.value)}
+          />
+        </div>
+      </header>
+
+      <main className="main-layout">
+        {/* 左側控制面板與影片區 */}
+        <div className="left-panel">
+          <div className="glass-panel" style={{ padding: '2rem' }}>
+            <div className="section-title">
+              <MessageSquare size={20} color="var(--primary)" />
+              SOP 分析指令 (Prompt)
+              <button 
+                onClick={fillSamplePrompt}
+                style={{ marginLeft: 'auto', background: '#fef3c7', color: '#d97706', border: '1px solid #fde68a', padding: '4px 12px', borderRadius: '8px', fontSize: '12px', fontWeight: 'bold', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px' }}
+              >
+                <Lightbulb size={14} /> 填入範例
+              </button>
+            </div>
+            <textarea 
+              className="prompt-textarea"
+              placeholder="請輸入 AI 分析規則，例如：請特別紀錄點擊報價單的步驟..."
+              value={userPrompt}
+              onChange={(e) => setUserPrompt(e.target.value)}
+            />
+          </div>
+
+          <div className="glass-panel" style={{ padding: '2rem' }}>
+            <div className="section-title">
+              <Upload size={20} color="var(--primary)" />
+              上傳影片 (僅限 .mp4)
+            </div>
+            
+            <label className={`upload-zone ${file ? 'active' : ''}`}>
+              <input type="file" className="hidden" accept=".mp4,video/mp4" onChange={handleFileChange} style={{ display: 'none' }} />
+              {file ? (
+                <>
+                  <FileVideo size={32} color="var(--primary)" style={{ marginBottom: '12px' }} />
+                  <p style={{ margin: 0, fontWeight: 700, fontSize: '14px', wordBreak: 'break-all' }}>{file.name}</p>
+                </>
+              ) : (
+                <>
+                  <PlayCircle size={40} color="#cbd5e1" style={{ marginBottom: '12px' }} />
+                  <p style={{ margin: 0, fontWeight: 700, color: '#64748b' }}>點擊或拖放上傳 MP4</p>
+                </>
+              )}
+            </label>
+
+            {videoPreview && (
+              <div className="video-container fade-in-up">
+                <video ref={videoRef} src={videoPreview} controls />
+              </div>
+            )}
+
+            <button 
+              onClick={startWorkflow} 
+              disabled={!file || status === 'uploading'} 
+              className="btn-primary"
+              style={{ marginTop: '1.5rem' }}
+            >
+              {status === 'idle' || status === 'completed' || status === 'error' ? '開始自動生成 SOP' : <><Loader2 className="spin" /> 處理中...</>}
+            </button>
+
+            {(status !== 'idle' && status !== 'error') && (
+              <div className="progress-container fade-in-up">
+                <div className="progress-header">
+                  <span>處理狀態: {status}</span>
+                  <span>{Math.round(progress)}%</span>
+                </div>
+                <div className="progress-bar">
+                  <div className="progress-fill" style={{ width: `\${progress}%` }} />
+                </div>
+              </div>
+            )}
+
+            {errorMessage && (
+              <div className="fade-in-up" style={{ marginTop: '1.5rem', padding: '1rem', background: '#fef2f2', border: '1px solid #fee2e2', borderRadius: '12px', color: '#ef4444', fontSize: '13px', fontWeight: '600' }}>
+                {errorMessage}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* 右側結果展示區 */}
+        <div className="right-panel">
+          <div className="glass-panel" style={{ padding: '2.5rem', minHeight: '100%' }}>
+            {result ? (
+              <div className="fade-in-up">
+                <div className="result-header">
+                  <h2 style={{ margin: 0, fontSize: '1.5rem', fontWeight: 800 }}>分析報告</h2>
+                  <div className="export-menu-container">
+                    <button className="btn-export">
+                      <Download size={16} /> 匯出選項 <ChevronDown size={14} />
+                    </button>
+                    <div className="export-dropdown">
+                      <button className="export-item" onClick={downloadMarkdown}>
+                        <FileText size={16} /> 下載 Markdown (.md)
+                      </button>
+                      <button className="export-item" onClick={() => copyToClipboard(generateMarkdown(result), 'Markdown')}>
+                        <Clipboard size={16} /> 複製 Markdown 語法
+                      </button>
+                      <button className="export-item" onClick={() => copyToClipboard(generatePlainText(result), '純文字')}>
+                        <File size={16} /> 複製純文字
+                      </button>
+                      <button className="export-item" onClick={() => copyToClipboard(JSON.stringify(result, null, 2), 'JSON')}>
+                        <FileCode size={16} /> 複製原始 JSON
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="sop-hero">
+                  <h3 className="sop-title">{result.process_name}</h3>
+                  <div className="sop-trigger">
+                    <span style={{ fontWeight: 800, fontSize: '10px', textTransform: 'uppercase', letterSpacing: '1px', opacity: 0.8 }}>啟動條件</span>
+                    <strong>{result.trigger}</strong>
+                  </div>
+                </div>
+
+                <div className="timeline">
+                  {result.steps.map((step, index) => (
+                    <div key={index} className="step-card-wrapper fade-in-up" style={{ animationDelay: `\${index * 0.1}s` }}>
+                      <div className="step-number">{index + 1}</div>
+                      
+                      <div 
+                        className="step-card" 
+                        onClick={() => editingIndex !== index && handleSeek(step.timestamp)}
+                      >
+                        {editingIndex === index ? (
+                          <div className="edit-form" onClick={e => e.stopPropagation()}>
+                            <label style={{ fontSize: '12px', fontWeight: 'bold', color: 'var(--text-muted)' }}>操作指令描述</label>
+                            <input 
+                              type="text" 
+                              className="edit-input" 
+                              value={editForm.instruction}
+                              onChange={e => setEditForm({...editForm, instruction: e.target.value})}
+                            />
+                            
+                            <label style={{ fontSize: '12px', fontWeight: 'bold', color: 'var(--text-muted)' }}>涉及 UI 元件</label>
+                            <input 
+                              type="text" 
+                              className="edit-input" 
+                              value={editForm.ui_element}
+                              onChange={e => setEditForm({...editForm, ui_element: e.target.value})}
+                            />
+                            
+                            <label style={{ fontSize: '12px', fontWeight: 'bold', color: 'var(--text-muted)' }}>專家實務建議 (選填)</label>
+                            <input 
+                              type="text" 
+                              className="edit-input" 
+                              value={editForm.pro_tip}
+                              onChange={e => setEditForm({...editForm, pro_tip: e.target.value})}
+                            />
+
+                            <div className="edit-actions">
+                              <button className="btn-small btn-cancel" onClick={cancelEdit}><X size={14} /> 取消</button>
+                              <button className="btn-small btn-save" onClick={(e) => saveEdit(e, index)}><Check size={14} /> 儲存</button>
+                            </div>
+                          </div>
+                        ) : (
+                          <>
+                            <button className="btn-edit-trigger" onClick={(e) => startEdit(e, index, step)} title="編輯此步驟">
+                              <Edit2 size={16} />
+                            </button>
+                            <div className="step-header">
+                              <span className="badge-time">
+                                <PlayCircle size={14} /> {step.timestamp}s
+                              </span>
+                              <span className="badge-ui">{step.ui_element}</span>
+                            </div>
+                            <h4 className="step-instruction">{step.instruction}</h4>
+                            {step.pro_tip && (
+                              <div className="step-tip">
+                                <div className="tip-icon"><Lightbulb size={16} /></div>
+                                <div className="tip-content">
+                                  <span className="tip-title">專家提示</span>
+                                  {step.pro_tip}
+                                </div>
+                              </div>
+                            )}
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <div className="empty-state fade-in-up">
+                <div className="empty-icon">
+                  <FileText size={32} color="#cbd5e1" />
+                </div>
+                <h3 style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--text-main)', margin: '0 0 8px 0' }}>尚無分析資料</h3>
+                <p style={{ margin: 0, fontSize: '0.875rem' }}>請於左側設定指令並上傳影片<br/>SOP 自動生成後將顯示於此，點擊步驟即可連動影片播放</p>
+              </div>
+            )}
+          </div>
+        </div>
+      </main>
+
+      <style>{`
+        .spin { animation: spin 1s linear infinite; }
+        @keyframes spin { 100% { transform: rotate(360deg); } }
+      `}</style>
+    </div>
+  );
+};
+
+export default App;
