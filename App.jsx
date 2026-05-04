@@ -58,6 +58,7 @@ const App = () => {
   const [progress, setProgress] = useState(0);
   const [result, setResult] = useState(null);
   const [errorMessage, setErrorMessage] = useState("");
+  const [isDragging, setIsDragging] = useState(false);
   
   // 影片控制參照
   const videoRef = useRef(null);
@@ -259,8 +260,7 @@ const App = () => {
     }
   };
 
-  const handleFileChange = (e) => {
-    const selectedFile = e.target.files[0];
+  const processFile = (selectedFile) => {
     if (!selectedFile) return;
     
     // 嚴格限制僅限 mp4
@@ -272,6 +272,28 @@ const App = () => {
       setErrorMessage("");
     } else {
       setErrorMessage("為了確保完美的影片時間軸連動體驗，請務必上傳 .mp4 格式的視訊檔案。");
+    }
+  };
+
+  const handleFileChange = (e) => {
+    processFile(e.target.files[0]);
+  };
+
+  const handleDragOver = (e) => {
+    e.preventDefault();
+    setIsDragging(true);
+  };
+
+  const handleDragLeave = (e) => {
+    e.preventDefault();
+    setIsDragging(false);
+  };
+
+  const handleDrop = (e) => {
+    e.preventDefault();
+    setIsDragging(false);
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      processFile(e.dataTransfer.files[0]);
     }
   };
 
@@ -404,7 +426,13 @@ const App = () => {
               上傳影片 (僅限 .mp4)
             </div>
             
-            <label className={`upload-zone ${file ? 'active' : ''}`}>
+            <label 
+              className={`upload-zone ${file || isDragging ? 'active' : ''}`}
+              onDragOver={handleDragOver}
+              onDragEnter={handleDragOver}
+              onDragLeave={handleDragLeave}
+              onDrop={handleDrop}
+            >
               <input type="file" className="hidden" accept=".mp4,video/mp4" onChange={handleFileChange} style={{ display: 'none' }} />
               {file ? (
                 <>
@@ -485,8 +513,7 @@ const App = () => {
                   </div>
                 </div>
 
-                <div>
-                  <div className="sop-hero">
+                <div className="sop-hero">
                     <h3 className="sop-title">{result.process_name}</h3>
                   <div style={{ color: 'var(--text-muted)', fontSize: '0.9rem', marginBottom: '1rem', fontWeight: '600' }}>
                     撰稿人：{result.author}
