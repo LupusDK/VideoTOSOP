@@ -40,7 +40,7 @@ JSON 必須符合以下結構：
 }
 `;
 
-const SAMPLE_PROMPT = `你是一位精通台灣企業採購流程的操作手冊專家。請觀察影片內容並撰寫詳細 SOP。
+const SAMPLE_PROMPT = `你是一位精通操作手冊撰寫專家。請觀察影片內容並撰寫詳細 SOP。
 【防幻覺規則】
 1. 僅紀錄影片中實際發生的動作與檔案名稱（如採購單號、Excel 檔名）。
 2. 如果影片內容不符，嚴禁胡謅。
@@ -89,7 +89,7 @@ const App = () => {
     data.parts.forEach(part => {
       md += `## ${part.part_title}\n\n`;
       part.steps.forEach(step => {
-        const ts = typeof step.timestamp === 'number' ? `${step.timestamp}s` : step.timestamp;
+        const ts = formatTime(step.timestamp);
         md += `### ${step.step_title} (🕒 ${ts})\n\n`;
         if (step.description) md += `${step.description}\n\n`;
         if (step.actions && step.actions.length > 0) {
@@ -115,7 +115,7 @@ const App = () => {
     data.parts.forEach(part => {
       text += `${part.part_title}\n`;
       part.steps.forEach(step => {
-        const ts = typeof step.timestamp === 'number' ? `${step.timestamp}s` : step.timestamp;
+        const ts = formatTime(step.timestamp);
         text += `${step.step_title} [${ts}]\n`;
         if (step.description) text += `${step.description}\n`;
         if (step.actions && step.actions.length > 0) {
@@ -140,6 +140,36 @@ const App = () => {
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
+  };
+
+  const formatTime = (seconds) => {
+    const s = parseInt(seconds, 10);
+    if (isNaN(s)) return seconds;
+    const mins = Math.floor(s / 60);
+    const secs = s % 60;
+    if (mins === 0) return `${secs}秒`;
+    return `${mins}分${secs.toString().padStart(2, '0')}秒`;
+  };
+
+  const downloadPDF = () => {
+    const element = document.getElementById('sop-report-content');
+    if (!element) return;
+    
+    // 暫時加上 PDF 匯出專用樣式類名
+    element.classList.add('pdf-exporting');
+    
+    const opt = {
+      margin:       10,
+      filename:     `${result?.process_name || 'SOP_Export'}.pdf`,
+      image:        { type: 'jpeg', quality: 0.98 },
+      html2canvas:  { scale: 2, useCORS: true, logging: false },
+      jsPDF:        { unit: 'mm', format: 'a4', orientation: 'portrait' }
+    };
+    
+    html2pdf().set(opt).from(element).toPdf().get('pdf').then(() => {
+      // 匯出完成後移除類名
+      element.classList.remove('pdf-exporting');
+    }).save();
   };
 
   // --- 影片跳轉功能 ---
@@ -428,7 +458,7 @@ const App = () => {
         <div className="right-panel">
           <div className="glass-panel" style={{ padding: '2.5rem', minHeight: '100%' }}>
             {result ? (
-              <div className="fade-in-up">
+              <div className="fade-in-up" id="sop-report-content">
                 <div className="result-header">
                   <h2 style={{ margin: 0, fontSize: '1.5rem', fontWeight: 800 }}>分析報告</h2>
                   <div className="export-menu-container">
@@ -436,6 +466,9 @@ const App = () => {
                       <Download size={16} /> 匯出選項 <ChevronDown size={14} />
                     </button>
                     <div className="export-dropdown">
+                      <button className="export-item" onClick={downloadPDF}>
+                        <FileVideo size={16} /> 輸出 PDF 報告
+                      </button>
                       <button className="export-item" onClick={downloadMarkdown}>
                         <FileText size={16} /> 下載 Markdown (.md)
                       </button>
@@ -452,8 +485,9 @@ const App = () => {
                   </div>
                 </div>
 
-                <div className="sop-hero">
-                  <h3 className="sop-title">{result.process_name}</h3>
+                <div>
+                  <div className="sop-hero">
+                    <h3 className="sop-title">{result.process_name}</h3>
                   <div style={{ color: 'var(--text-muted)', fontSize: '0.9rem', marginBottom: '1rem', fontWeight: '600' }}>
                     撰稿人：{result.author}
                   </div>
@@ -523,7 +557,7 @@ const App = () => {
                                   </button>
                                   <div className="step-header" style={{ marginBottom: '0.5rem' }}>
                                     <span className="badge-time">
-                                      <PlayCircle size={14} /> {step.timestamp}s
+                                      <PlayCircle size={14} /> {formatTime(step.timestamp)}
                                     </span>
                                   </div>
                                   <h4 className="step-instruction" style={{ fontSize: '1.1rem', marginBottom: '0.5rem', color: 'var(--text-main)' }}>{step.step_title}</h4>
@@ -567,6 +601,21 @@ const App = () => {
       <style>{`
         .spin { animation: spin 1s linear infinite; }
         @keyframes spin { 100% { transform: rotate(360deg); } }
+        
+        /* PDF 匯出專用樣式 */
+        #sop-report-content.pdf-exporting {
+          background: white !important;
+          padding: 20px !important;
+          color: black !important;
+        }
+        #sop-report-content.pdf-exporting .btn-export, 
+        #sop-report-content.pdf-exporting .btn-edit-trigger {
+          display: none !important;
+        }
+        #sop-report-content.pdf-exporting .sop-hero {
+          box-shadow: none !important;
+          border-radius: 12px !important;
+        }
       `}</style>
     </div>
   );
