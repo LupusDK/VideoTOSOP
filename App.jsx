@@ -14,14 +14,29 @@ const DEFAULT_MODEL = "gemini-2.5-flash-preview-09-2025";
 const FIXED_FORMAT_PROMPT = `
 【輸出格式】
 你必須僅回傳一個合法的 JSON 物件，不要包含任何 Markdown 標籤（如 \`\`\`json）。
-JSON 必須包含以下欄位：
-- process_name: 字串，SOP 名稱
-- trigger: 字串，起始條件
-- steps: 陣列，包含物件：
-  - timestamp: 數字，影片秒數 (請只給數字，不要加上 's')
-  - ui_element: 字串，涉及組件
-  - instruction: 字串，詳細步驟描述
-  - pro_tip: 字串，額外提示 (可為空)
+JSON 必須符合以下結構：
+{
+  "author": "字串，撰稿人名稱 (若影片無提及，請根據角色假設或填寫 'AI 系統')",
+  "introduction": "字串，一兩句話說明此 SOP 的作用與目的",
+  "process_name": "字串，SOP 標題",
+  "trigger": "字串，起始條件",
+  "parts": [
+    {
+      "part_title": "字串，段落標題，例如 '【第一部分】事前準備'",
+      "steps": [
+        {
+          "step_title": "字串，步驟標題，例如 '步驟1：建立一個新的儲存庫'",
+          "timestamp": "數字，影片開始的秒數 (請只給數字，不要加上 's')",
+          "description": "字串，步驟的簡單說明 (可為空)",
+          "actions": [
+            "字串，具體操作動作，例如 '1. 登入GitHub...'",
+            "字串，另一個操作動作"
+          ]
+        }
+      ]
+    }
+  ]
+}
 `;
 
 const SAMPLE_PROMPT = `你是一位精通台灣企業採購流程的操作手冊專家。請觀察影片內容並撰寫詳細 SOP。
@@ -47,8 +62,8 @@ const App = () => {
   const videoRef = useRef(null);
 
   // 編輯狀態
-  const [editingIndex, setEditingIndex] = useState(null);
-  const [editForm, setEditForm] = useState({ instruction: '', ui_element: '', pro_tip: '' });
+  const [editingPos, setEditingPos] = useState({ partIndex: null, stepIndex: null });
+  const [editForm, setEditForm] = useState({ step_title: '', description: '', actions: '' });
 
   const fillSamplePrompt = () => setUserPrompt(SAMPLE_PROMPT);
 
@@ -63,32 +78,52 @@ const App = () => {
   };
 
   const generateMarkdown = (data) => {
-    if (!data || !data.steps) return "尚無數據可生成 Markdown。";
+    if (!data || !data.parts) return "尚無數據可生成 Markdown。";
     let md = `# ${data.process_name || '標準作業程序 (SOP)'}\n\n`;
-    md += `## 📋 流程概覽\n`;
-    md += `- **觸發條件**：${data.trigger || '未指定'}\n`;
-    md += `- **生成時間**：${new Date().toLocaleString('zh-TW')}\n\n`;
-    md += `## 🛠️ 執行步驟詳解\n\n`;
-    md += `| 步驟 | 影片時戳 | 涉及 UI 元件 | 操作指令描述 | 專家實務建議 |\n`;
-    md += `| :--- | :--- | :--- | :--- | :--- |\n`;
+    md += `**撰稿人**：${data.author || '未指定'}\n\n`;
+    if (data.introduction) md += `${data.introduction}\n\n`;
+    md += `> **觸發條件**：${data.trigger || '未指定'}\n>\n`;
+    md += `> **生成時間**：${new Date().toLocaleString('zh-TW')}\n\n`;
     
-    data.steps.forEach((s, i) => {
-      const ts = typeof s.timestamp === 'number' ? \`\${s.timestamp}s\` : s.timestamp;
-      md += `| \${i + 1} | \${ts} | \${s.ui_element || '-'} | \${s.instruction || '-'} | \${s.pro_tip || '-'} |\n`;
+    data.parts.forEach(part => {
+      md += `## ${part.part_title}\n\n`;
+      part.steps.forEach(step => {
+        const ts = typeof step.timestamp === 'number' ? `${step.timestamp}s` : step.timestamp;
+        md += `### ${step.step_title} (🕒 ${ts})\n\n`;
+        if (step.description) md += `${step.description}\n\n`;
+        if (step.actions && step.actions.length > 0) {
+          step.actions.forEach(action => {
+            md += `- ${action}\n`;
+          });
+          md += `\n`;
+        }
+      });
     });
     
-    md += `\n\n---\n*本文件由 AI 錄影轉 SOP 系統自動生成*`;
+    md += `---\n*本文件由 AI 錄影轉 SOP 系統自動生成*`;
     return md;
   };
 
   const generatePlainText = (data) => {
-    if (!data || !data.steps) return "";
-    let text = `【${data.process_name}】\n觸發條件：${data.trigger}\n\n`;
-    data.steps.forEach((s, i) => {
-      const ts = typeof s.timestamp === 'number' ? \`\${s.timestamp}s\` : s.timestamp;
-      text += `步驟 ${i + 1} [${ts}]:\n操作: ${s.instruction}\n元件: ${s.ui_element}\n`;
-      if (s.pro_tip) text += `💡提示: ${s.pro_tip}\n`;
-      text += `\n`;
+    if (!data || !data.parts) return "";
+    let text = `【${data.process_name}】\n`;
+    text += `撰稿人：${data.author || '未指定'}\n\n`;
+    if (data.introduction) text += `${data.introduction}\n\n`;
+    text += `觸發條件：${data.trigger || '未指定'}\n\n`;
+    
+    data.parts.forEach(part => {
+      text += `${part.part_title}\n`;
+      part.steps.forEach(step => {
+        const ts = typeof step.timestamp === 'number' ? `${step.timestamp}s` : step.timestamp;
+        text += `${step.step_title} [${ts}]\n`;
+        if (step.description) text += `${step.description}\n`;
+        if (step.actions && step.actions.length > 0) {
+          step.actions.forEach(action => {
+            text += `${action}\n`;
+          });
+        }
+        text += `\n`;
+      });
     });
     return text;
   };
@@ -99,7 +134,7 @@ const App = () => {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `\${result?.process_name || 'SOP_Export'}.md`;
+    a.download = `${result?.process_name || 'SOP_Export'}.md`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -118,32 +153,30 @@ const App = () => {
   };
 
   // --- 內聯編輯功能 ---
-  const startEdit = (e, index, step) => {
+  const startEdit = (e, partIndex, stepIndex, step) => {
     e.stopPropagation(); // 避免觸發跳轉
-    setEditingIndex(index);
+    setEditingPos({ partIndex, stepIndex });
     setEditForm({
-      instruction: step.instruction || '',
-      ui_element: step.ui_element || '',
-      pro_tip: step.pro_tip || ''
+      step_title: step.step_title || '',
+      description: step.description || '',
+      actions: step.actions ? step.actions.join('\n') : ''
     });
   };
 
-  const saveEdit = (e, index) => {
+  const saveEdit = (e, partIndex, stepIndex) => {
     e.stopPropagation();
     const newResult = { ...result };
-    newResult.steps[index] = {
-      ...newResult.steps[index],
-      instruction: editForm.instruction,
-      ui_element: editForm.ui_element,
-      pro_tip: editForm.pro_tip
-    };
+    const targetStep = newResult.parts[partIndex].steps[stepIndex];
+    targetStep.step_title = editForm.step_title;
+    targetStep.description = editForm.description;
+    targetStep.actions = editForm.actions.split('\n').filter(a => a.trim() !== '');
     setResult(newResult);
-    setEditingIndex(null);
+    setEditingPos({ partIndex: null, stepIndex: null });
   };
 
   const cancelEdit = (e) => {
     e.stopPropagation();
-    setEditingIndex(null);
+    setEditingPos({ partIndex: null, stepIndex: null });
   };
 
   // --- API 邏輯 ---
@@ -155,7 +188,7 @@ const App = () => {
     }
     setIsDetecting(true);
     try {
-      const response = await fetch(`\${BASE_URL}/models?key=\${key}`);
+      const response = await fetch(`${BASE_URL}/models?key=${key}`);
       const data = await response.json();
       if (data.models) {
         const models = data.models
@@ -170,7 +203,7 @@ const App = () => {
         throw new Error(data.error.message);
       }
     } catch (err) {
-      setErrorMessage(`偵測模型失敗: \${err.message}`);
+      setErrorMessage(`偵測模型失敗: ${err.message}`);
     } finally {
       setIsDetecting(false);
     }
@@ -214,7 +247,7 @@ const App = () => {
   const startWorkflow = async () => {
     if (!file) return;
     const currentKey = apiKey || API_KEY_DEFAULT;
-    const finalPrompt = `\${userPrompt.trim() || SAMPLE_PROMPT}\n\n\${FIXED_FORMAT_PROMPT}`;
+    const finalPrompt = `${userPrompt.trim() || SAMPLE_PROMPT}\n\n${FIXED_FORMAT_PROMPT}`;
 
     setStatus('uploading');
     setErrorMessage("");
@@ -226,7 +259,7 @@ const App = () => {
       formData.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
       formData.append('file', file);
 
-      const uploadData = await fetchWithRetry(`\${UPLOAD_URL}/files?key=\${currentKey}`, {
+      const uploadData = await fetchWithRetry(`${UPLOAD_URL}/files?key=${currentKey}`, {
         method: 'POST',
         headers: { 'X-Goog-Upload-Protocol': 'multipart' },
         body: formData
@@ -238,7 +271,7 @@ const App = () => {
       setStatus('processing');
       let attempts = 0;
       while (attempts < 60) {
-        const s = await fetch(`\${BASE_URL}/\${fileName}?key=\${currentKey}`).then(r => r.json());
+        const s = await fetch(`${BASE_URL}/${fileName}?key=${currentKey}`).then(r => r.json());
         if (s.state === 'ACTIVE') break;
         else if (s.state === 'FAILED') throw new Error("視訊解析失敗，請確認檔案。");
         await new Promise(r => setTimeout(r, 4000));
@@ -260,7 +293,7 @@ const App = () => {
         generationConfig: { responseMimeType: "application/json", temperature: 0.1 }
       };
 
-      const genData = await fetchWithRetry(`\${BASE_URL}/models/\${modelName}:generateContent?key=\${currentKey}`, {
+      const genData = await fetchWithRetry(`${BASE_URL}/models/${modelName}:generateContent?key=${currentKey}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
@@ -288,6 +321,16 @@ const App = () => {
           SOP Auto-Gen Studio
         </div>
         <div className="controls-row">
+          <input 
+            type="password" 
+            placeholder="輸入Google Gemini API Key"
+            className="input-modern"
+            value={apiKey}
+            onChange={(e) => setApiKey(e.target.value)}
+          />
+          <button onClick={detectModels} title="偵測可用AI模型" className="icon-box" style={{ background: 'white', color: '#64748b', border: '1px solid #cbd5e1', cursor: 'pointer' }}>
+            <RefreshCw size={16} className={isDetecting ? 'spin' : ''} />
+          </button>
           <select 
             className="select-modern"
             value={modelName}
@@ -299,16 +342,6 @@ const App = () => {
               <option value={DEFAULT_MODEL}>{DEFAULT_MODEL} (預設)</option>
             )}
           </select>
-          <button onClick={detectModels} className="icon-box" style={{ background: 'white', color: '#64748b', border: '1px solid #cbd5e1', cursor: 'pointer' }}>
-            <RefreshCw size={16} className={isDetecting ? 'spin' : ''} />
-          </button>
-          <input 
-            type="password" 
-            placeholder="請貼上 Gemini API Key"
-            className="input-modern"
-            value={apiKey}
-            onChange={(e) => setApiKey(e.target.value)}
-          />
         </div>
       </header>
 
@@ -377,7 +410,7 @@ const App = () => {
                   <span>{Math.round(progress)}%</span>
                 </div>
                 <div className="progress-bar">
-                  <div className="progress-fill" style={{ width: `\${progress}%` }} />
+                  <div className="progress-fill" style={{ width: `${progress}%` }} />
                 </div>
               </div>
             )}
@@ -420,6 +453,14 @@ const App = () => {
 
                 <div className="sop-hero">
                   <h3 className="sop-title">{result.process_name}</h3>
+                  <div style={{ color: 'var(--text-muted)', fontSize: '0.9rem', marginBottom: '1rem', fontWeight: '600' }}>
+                    撰稿人：{result.author}
+                  </div>
+                  {result.introduction && (
+                    <div style={{ color: 'var(--text-main)', fontSize: '1rem', marginBottom: '1.5rem', lineHeight: '1.6', background: '#f8fafc', padding: '1rem', borderRadius: '8px', borderLeft: '4px solid var(--primary)' }}>
+                      {result.introduction}
+                    </div>
+                  )}
                   <div className="sop-trigger">
                     <span style={{ fontWeight: 800, fontSize: '10px', textTransform: 'uppercase', letterSpacing: '1px', opacity: 0.8 }}>啟動條件</span>
                     <strong>{result.trigger}</strong>
@@ -427,69 +468,80 @@ const App = () => {
                 </div>
 
                 <div className="timeline">
-                  {result.steps.map((step, index) => (
-                    <div key={index} className="step-card-wrapper fade-in-up" style={{ animationDelay: `\${index * 0.1}s` }}>
-                      <div className="step-number">{index + 1}</div>
-                      
-                      <div 
-                        className="step-card" 
-                        onClick={() => editingIndex !== index && handleSeek(step.timestamp)}
-                      >
-                        {editingIndex === index ? (
-                          <div className="edit-form" onClick={e => e.stopPropagation()}>
-                            <label style={{ fontSize: '12px', fontWeight: 'bold', color: 'var(--text-muted)' }}>操作指令描述</label>
-                            <input 
-                              type="text" 
-                              className="edit-input" 
-                              value={editForm.instruction}
-                              onChange={e => setEditForm({...editForm, instruction: e.target.value})}
-                            />
+                  {result.parts && result.parts.map((part, pIndex) => (
+                    <div key={pIndex} className="part-section" style={{ marginBottom: '2.5rem' }}>
+                      <h3 style={{ fontSize: '1.25rem', color: 'var(--primary)', borderBottom: '2px solid #e2e8f0', paddingBottom: '0.5rem', marginBottom: '1.5rem', fontWeight: 'bold' }}>
+                        {part.part_title}
+                      </h3>
+                      {part.steps && part.steps.map((step, sIndex) => {
+                        const isEditing = editingPos.partIndex === pIndex && editingPos.stepIndex === sIndex;
+                        return (
+                          <div key={sIndex} className="step-card-wrapper fade-in-up" style={{ animationDelay: `${sIndex * 0.1}s` }}>
+                            <div className="step-number" style={{ background: 'var(--primary)', color: 'white' }}>{sIndex + 1}</div>
                             
-                            <label style={{ fontSize: '12px', fontWeight: 'bold', color: 'var(--text-muted)' }}>涉及 UI 元件</label>
-                            <input 
-                              type="text" 
-                              className="edit-input" 
-                              value={editForm.ui_element}
-                              onChange={e => setEditForm({...editForm, ui_element: e.target.value})}
-                            />
-                            
-                            <label style={{ fontSize: '12px', fontWeight: 'bold', color: 'var(--text-muted)' }}>專家實務建議 (選填)</label>
-                            <input 
-                              type="text" 
-                              className="edit-input" 
-                              value={editForm.pro_tip}
-                              onChange={e => setEditForm({...editForm, pro_tip: e.target.value})}
-                            />
+                            <div 
+                              className="step-card" 
+                              onClick={() => !isEditing && handleSeek(step.timestamp)}
+                              style={{ cursor: isEditing ? 'default' : 'pointer' }}
+                            >
+                              {isEditing ? (
+                                <div className="edit-form" onClick={e => e.stopPropagation()}>
+                                  <label style={{ fontSize: '12px', fontWeight: 'bold', color: 'var(--text-muted)' }}>步驟標題</label>
+                                  <input 
+                                    type="text" 
+                                    className="edit-input" 
+                                    value={editForm.step_title}
+                                    onChange={e => setEditForm({...editForm, step_title: e.target.value})}
+                                  />
+                                  
+                                  <label style={{ fontSize: '12px', fontWeight: 'bold', color: 'var(--text-muted)' }}>步驟說明 (選填)</label>
+                                  <input 
+                                    type="text" 
+                                    className="edit-input" 
+                                    value={editForm.description}
+                                    onChange={e => setEditForm({...editForm, description: e.target.value})}
+                                  />
+                                  
+                                  <label style={{ fontSize: '12px', fontWeight: 'bold', color: 'var(--text-muted)' }}>具體操作動作 (每行一個動作)</label>
+                                  <textarea 
+                                    className="edit-input" 
+                                    style={{ minHeight: '100px', resize: 'vertical' }}
+                                    value={editForm.actions}
+                                    onChange={e => setEditForm({...editForm, actions: e.target.value})}
+                                  />
 
-                            <div className="edit-actions">
-                              <button className="btn-small btn-cancel" onClick={cancelEdit}><X size={14} /> 取消</button>
-                              <button className="btn-small btn-save" onClick={(e) => saveEdit(e, index)}><Check size={14} /> 儲存</button>
+                                  <div className="edit-actions">
+                                    <button className="btn-small btn-cancel" onClick={cancelEdit}><X size={14} /> 取消</button>
+                                    <button className="btn-small btn-save" onClick={(e) => saveEdit(e, pIndex, sIndex)}><Check size={14} /> 儲存</button>
+                                  </div>
+                                </div>
+                              ) : (
+                                <>
+                                  <button className="btn-edit-trigger" onClick={(e) => startEdit(e, pIndex, sIndex, step)} title="編輯此步驟">
+                                    <Edit2 size={16} />
+                                  </button>
+                                  <div className="step-header" style={{ marginBottom: '0.5rem' }}>
+                                    <span className="badge-time">
+                                      <PlayCircle size={14} /> {step.timestamp}s
+                                    </span>
+                                  </div>
+                                  <h4 className="step-instruction" style={{ fontSize: '1.1rem', marginBottom: '0.5rem', color: 'var(--text-main)' }}>{step.step_title}</h4>
+                                  {step.description && (
+                                    <p style={{ color: 'var(--text-muted)', fontSize: '0.95rem', marginBottom: '1rem', lineHeight: '1.5' }}>{step.description}</p>
+                                  )}
+                                  {step.actions && step.actions.length > 0 && (
+                                    <ul style={{ margin: 0, paddingLeft: '1.5rem', color: 'var(--text-main)', fontSize: '0.95rem', lineHeight: '1.6' }}>
+                                      {step.actions.map((action, aIndex) => (
+                                        <li key={aIndex} style={{ marginBottom: '0.25rem' }}>{action}</li>
+                                      ))}
+                                    </ul>
+                                  )}
+                                </>
+                              )}
                             </div>
                           </div>
-                        ) : (
-                          <>
-                            <button className="btn-edit-trigger" onClick={(e) => startEdit(e, index, step)} title="編輯此步驟">
-                              <Edit2 size={16} />
-                            </button>
-                            <div className="step-header">
-                              <span className="badge-time">
-                                <PlayCircle size={14} /> {step.timestamp}s
-                              </span>
-                              <span className="badge-ui">{step.ui_element}</span>
-                            </div>
-                            <h4 className="step-instruction">{step.instruction}</h4>
-                            {step.pro_tip && (
-                              <div className="step-tip">
-                                <div className="tip-icon"><Lightbulb size={16} /></div>
-                                <div className="tip-content">
-                                  <span className="tip-title">專家提示</span>
-                                  {step.pro_tip}
-                                </div>
-                              </div>
-                            )}
-                          </>
-                        )}
-                      </div>
+                        );
+                      })}
                     </div>
                   ))}
                 </div>
@@ -506,6 +558,10 @@ const App = () => {
           </div>
         </div>
       </main>
+
+      <footer style={{ textAlign: 'center', padding: '1.5rem', color: '#64748b', fontSize: '14px', fontWeight: '500' }}>
+        這個網頁開發屬於臺灣港務股份有限公司資訊處
+      </footer>
 
       <style>{`
         .spin { animation: spin 1s linear infinite; }
