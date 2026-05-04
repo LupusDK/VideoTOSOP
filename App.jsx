@@ -10,7 +10,7 @@ import {
 const API_KEY_DEFAULT = "";
 const BASE_URL = "https://generativelanguage.googleapis.com/v1beta";
 const UPLOAD_URL = "https://generativelanguage.googleapis.com/upload/v1beta";
-const DEFAULT_MODEL = "gemini-2.5-flash-preview-09-2025";
+const DEFAULT_MODEL = "gemini-2.5-flash";
 
 const FIXED_FORMAT_PROMPT = `
 【輸出格式】
