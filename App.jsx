@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { createRoot } from 'react-dom/client';
 import { 
   Upload, FileVideo, PlayCircle, Settings, Clipboard, Download, 
   FileCode, MessageSquare, Lightbulb, Loader2, RefreshCw, 
   Edit2, Check, X, ChevronDown, FileText, File
 } from 'lucide-react';
-import './App.css'; // 引入我們建立的高質感 Vanilla CSS
+// import './App.css'; // 已在 index.html 中載入，在瀏覽器環境中註解掉避免報錯
 
 const API_KEY_DEFAULT = ""; 
 const BASE_URL = "https://generativelanguage.googleapis.com/v1beta";
@@ -570,5 +571,12 @@ const App = () => {
     </div>
   );
 };
+
+// --- 啟動應用程式 ---
+const container = document.getElementById('root');
+if (container) {
+  const root = createRoot(container);
+  root.render(<App />);
+}
 
 export default App;
