@@ -1,13 +1,13 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { createRoot } from 'react-dom/client';
-import { 
-  Upload, FileVideo, PlayCircle, Settings, Clipboard, Download, 
-  FileCode, MessageSquare, Lightbulb, Loader2, RefreshCw, 
+import {
+  Upload, FileVideo, PlayCircle, Settings, Clipboard, Download,
+  FileCode, MessageSquare, Lightbulb, Loader2, RefreshCw,
   Edit2, Check, X, ChevronDown, FileText, File
 } from 'lucide-react';
 // import './App.css'; // 已在 index.html 中載入，在瀏覽器環境中註解掉避免報錯
 
-const API_KEY_DEFAULT = ""; 
+const API_KEY_DEFAULT = "";
 const BASE_URL = "https://generativelanguage.googleapis.com/v1beta";
 const UPLOAD_URL = "https://generativelanguage.googleapis.com/upload/v1beta";
 const DEFAULT_MODEL = "gemini-2.5-flash-preview-09-2025";
@@ -17,7 +17,7 @@ const FIXED_FORMAT_PROMPT = `
 你必須僅回傳一個合法的 JSON 物件，不要包含任何 Markdown 標籤（如 \`\`\`json）。
 JSON 必須符合以下結構：
 {
-  "author": "字串，撰稿人名稱 (若影片無提及，請根據角色假設或填寫 'AI 系統')",
+  "author": "字串，撰稿人名稱 (若影片無提及，請根據角色假設或填寫 '自動化生成SOP系統')",
   "introduction": "字串，一兩句話說明此 SOP 的作用與目的",
   "process_name": "字串，SOP 標題",
   "trigger": "字串，起始條件",
@@ -41,14 +41,16 @@ JSON 必須符合以下結構：
 `;
 
 const SAMPLE_PROMPT = `你是一位精通操作手冊撰寫專家。請觀察影片內容並撰寫詳細 SOP。
+撰稿人：XXX
 【防幻覺規則】
 1. 僅紀錄影片中實際發生的動作與檔案名稱（如採購單號、Excel 檔名）。
 2. 如果影片內容不符，嚴禁胡謅。
-3. 使用台灣地區常用正體中文與術語（軟體、儲存、設定、檔案、網路）。`;
+3. 使用台灣地區常用正體中文與術語（軟體、儲存、設定、檔案、網路）。
+4. 輸出文字若包含引號，請務必改用「單引號」或「全形引號」，嚴禁使用半形雙引號 (") 以免破壞 JSON 結構。`;
 
 const App = () => {
   const [apiKey, setApiKey] = useState("");
-  const [modelName, setModelName] = useState(DEFAULT_MODEL); 
+  const [modelName, setModelName] = useState(DEFAULT_MODEL);
   const [availableModels, setAvailableModels] = useState([]);
   const [isDetecting, setIsDetecting] = useState(false);
   const [userPrompt, setUserPrompt] = useState("");
@@ -59,7 +61,7 @@ const App = () => {
   const [result, setResult] = useState(null);
   const [errorMessage, setErrorMessage] = useState("");
   const [isDragging, setIsDragging] = useState(false);
-  
+
   // 影片控制參照
   const videoRef = useRef(null);
 
@@ -86,7 +88,7 @@ const App = () => {
     if (data.introduction) md += `${data.introduction}\n\n`;
     md += `> **觸發條件**：${data.trigger || '未指定'}\n>\n`;
     md += `> **生成時間**：${new Date().toLocaleString('zh-TW')}\n\n`;
-    
+
     data.parts.forEach(part => {
       md += `## ${part.part_title}\n\n`;
       part.steps.forEach(step => {
@@ -101,7 +103,7 @@ const App = () => {
         }
       });
     });
-    
+
     md += `---\n*本文件由 AI 錄影轉 SOP 系統自動生成*`;
     return md;
   };
@@ -112,7 +114,7 @@ const App = () => {
     text += `撰稿人：${data.author || '未指定'}\n\n`;
     if (data.introduction) text += `${data.introduction}\n\n`;
     text += `觸發條件：${data.trigger || '未指定'}\n\n`;
-    
+
     data.parts.forEach(part => {
       text += `${part.part_title}\n`;
       part.steps.forEach(step => {
@@ -153,24 +155,8 @@ const App = () => {
   };
 
   const downloadPDF = () => {
-    const element = document.getElementById('sop-report-content');
-    if (!element) return;
-    
-    // 暫時加上 PDF 匯出專用樣式類名
-    element.classList.add('pdf-exporting');
-    
-    const opt = {
-      margin:       10,
-      filename:     `${result?.process_name || 'SOP_Export'}.pdf`,
-      image:        { type: 'jpeg', quality: 0.98 },
-      html2canvas:  { scale: 2, useCORS: true, logging: false },
-      jsPDF:        { unit: 'mm', format: 'a4', orientation: 'portrait' }
-    };
-    
-    html2pdf().set(opt).from(element).toPdf().get('pdf').then(() => {
-      // 匯出完成後移除類名
-      element.classList.remove('pdf-exporting');
-    }).save();
+    // 呼叫瀏覽器原生的列印功能（可選擇儲存為 PDF）
+    window.print();
   };
 
   // --- 影片跳轉功能 ---
@@ -253,8 +239,8 @@ const App = () => {
           continue;
         }
         throw { status: res.status, data };
-      } catch (err) { 
-        if (i === retries - 1) throw err; 
+      } catch (err) {
+        if (i === retries - 1) throw err;
         await new Promise(r => setTimeout(r, Math.pow(2, i) * 1000));
       }
     }
@@ -262,7 +248,7 @@ const App = () => {
 
   const processFile = (selectedFile) => {
     if (!selectedFile) return;
-    
+
     // 嚴格限制僅限 mp4
     if (selectedFile.type === 'video/mp4' || selectedFile.name.toLowerCase().endsWith('.mp4')) {
       setFile(selectedFile);
@@ -305,7 +291,7 @@ const App = () => {
     setStatus('uploading');
     setErrorMessage("");
     setProgress(10);
-    
+
     try {
       const metadata = { file: { display_name: file.name } };
       const formData = new FormData();
@@ -317,10 +303,10 @@ const App = () => {
         headers: { 'X-Goog-Upload-Protocol': 'multipart' },
         body: formData
       });
-      
+
       const fileUri = uploadData.file.uri;
       const fileName = uploadData.file.name;
-      
+
       setStatus('processing');
       let attempts = 0;
       while (attempts < 60) {
@@ -342,7 +328,7 @@ const App = () => {
             { text: "請分析此視訊內容並產出 SOP JSON。請精確對照視訊中的畫面動作與發生時間。" },
           ]
         }],
-        systemInstruction: { parts: [{ text: finalPrompt }] }, 
+        systemInstruction: { parts: [{ text: finalPrompt }] },
         generationConfig: { responseMimeType: "application/json", temperature: 0.1 }
       };
 
@@ -352,11 +338,18 @@ const App = () => {
         body: JSON.stringify(payload)
       });
 
-      const txt = genData.candidates?.[0]?.content?.parts?.[0]?.text;
+      let txt = genData.candidates?.[0]?.content?.parts?.[0]?.text;
       if (txt) {
-        setResult(JSON.parse(txt));
-        setStatus('completed');
-        setProgress(100);
+        try {
+          // 移除可能存在的 markdown json 標籤
+          txt = txt.replace(/^```json\n?/g, '').replace(/```$/g, '').trim();
+          setResult(JSON.parse(txt));
+          setStatus('completed');
+          setProgress(100);
+        } catch (parseError) {
+          console.error("JSON 解析失敗，原始文字：", txt);
+          throw new Error("AI 產生的格式發生衝突（可能是引號未正確跳脫），請重新點擊「開始自動生成」再試一次。");
+        }
       } else {
         throw new Error("模型無回應內容。");
       }
@@ -374,8 +367,8 @@ const App = () => {
           SOP Auto-Gen Studio
         </div>
         <div className="controls-row">
-          <input 
-            type="password" 
+          <input
+            type="password"
             placeholder="輸入Google Gemini API Key"
             className="input-modern"
             value={apiKey}
@@ -384,7 +377,7 @@ const App = () => {
           <button onClick={detectModels} title="偵測可用AI模型" className="icon-box" style={{ background: 'white', color: '#64748b', border: '1px solid #cbd5e1', cursor: 'pointer' }}>
             <RefreshCw size={16} className={isDetecting ? 'spin' : ''} />
           </button>
-          <select 
+          <select
             className="select-modern"
             value={modelName}
             onChange={(e) => setModelName(e.target.value)}
@@ -405,14 +398,14 @@ const App = () => {
             <div className="section-title">
               <MessageSquare size={20} color="var(--primary)" />
               SOP 分析指令 (Prompt)
-              <button 
+              <button
                 onClick={fillSamplePrompt}
                 style={{ marginLeft: 'auto', background: '#fef3c7', color: '#d97706', border: '1px solid #fde68a', padding: '4px 12px', borderRadius: '8px', fontSize: '12px', fontWeight: 'bold', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px' }}
               >
                 <Lightbulb size={14} /> 填入範例
               </button>
             </div>
-            <textarea 
+            <textarea
               className="prompt-textarea"
               placeholder="請輸入 AI 分析規則，例如：請特別紀錄點擊報價單的步驟..."
               value={userPrompt}
@@ -425,8 +418,8 @@ const App = () => {
               <Upload size={20} color="var(--primary)" />
               上傳影片 (僅限 .mp4)
             </div>
-            
-            <label 
+
+            <label
               className={`upload-zone ${file || isDragging ? 'active' : ''}`}
               onDragOver={handleDragOver}
               onDragEnter={handleDragOver}
@@ -453,9 +446,9 @@ const App = () => {
               </div>
             )}
 
-            <button 
-              onClick={startWorkflow} 
-              disabled={!file || status === 'uploading'} 
+            <button
+              onClick={startWorkflow}
+              disabled={!file || status === 'uploading'}
               className="btn-primary"
               style={{ marginTop: '1.5rem' }}
             >
@@ -488,7 +481,6 @@ const App = () => {
             {result ? (
               <div className="fade-in-up" id="sop-report-content">
                 <div className="result-header">
-                  <h2 style={{ margin: 0, fontSize: '1.5rem', fontWeight: 800 }}>分析報告</h2>
                   <div className="export-menu-container">
                     <button className="btn-export">
                       <Download size={16} /> 匯出選項 <ChevronDown size={14} />
@@ -514,7 +506,7 @@ const App = () => {
                 </div>
 
                 <div className="sop-hero">
-                    <h3 className="sop-title">{result.process_name}</h3>
+                  <h3 className="sop-title">{result.process_name}</h3>
                   <div style={{ color: 'var(--text-muted)', fontSize: '0.9rem', marginBottom: '1rem', fontWeight: '600' }}>
                     撰稿人：{result.author}
                   </div>
@@ -540,36 +532,36 @@ const App = () => {
                         return (
                           <div key={sIndex} className="step-card-wrapper fade-in-up" style={{ animationDelay: `${sIndex * 0.1}s` }}>
                             <div className="step-number" style={{ background: 'var(--primary)', color: 'white' }}>{sIndex + 1}</div>
-                            
-                            <div 
-                              className="step-card" 
+
+                            <div
+                              className="step-card"
                               onClick={() => !isEditing && handleSeek(step.timestamp)}
                               style={{ cursor: isEditing ? 'default' : 'pointer' }}
                             >
                               {isEditing ? (
                                 <div className="edit-form" onClick={e => e.stopPropagation()}>
                                   <label style={{ fontSize: '12px', fontWeight: 'bold', color: 'var(--text-muted)' }}>步驟標題</label>
-                                  <input 
-                                    type="text" 
-                                    className="edit-input" 
+                                  <input
+                                    type="text"
+                                    className="edit-input"
                                     value={editForm.step_title}
-                                    onChange={e => setEditForm({...editForm, step_title: e.target.value})}
+                                    onChange={e => setEditForm({ ...editForm, step_title: e.target.value })}
                                   />
-                                  
+
                                   <label style={{ fontSize: '12px', fontWeight: 'bold', color: 'var(--text-muted)' }}>步驟說明 (選填)</label>
-                                  <input 
-                                    type="text" 
-                                    className="edit-input" 
+                                  <input
+                                    type="text"
+                                    className="edit-input"
                                     value={editForm.description}
-                                    onChange={e => setEditForm({...editForm, description: e.target.value})}
+                                    onChange={e => setEditForm({ ...editForm, description: e.target.value })}
                                   />
-                                  
+
                                   <label style={{ fontSize: '12px', fontWeight: 'bold', color: 'var(--text-muted)' }}>具體操作動作 (每行一個動作)</label>
-                                  <textarea 
-                                    className="edit-input" 
+                                  <textarea
+                                    className="edit-input"
                                     style={{ minHeight: '100px', resize: 'vertical' }}
                                     value={editForm.actions}
-                                    onChange={e => setEditForm({...editForm, actions: e.target.value})}
+                                    onChange={e => setEditForm({ ...editForm, actions: e.target.value })}
                                   />
 
                                   <div className="edit-actions">
@@ -614,7 +606,7 @@ const App = () => {
                   <FileText size={32} color="#cbd5e1" />
                 </div>
                 <h3 style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--text-main)', margin: '0 0 8px 0' }}>尚無分析資料</h3>
-                <p style={{ margin: 0, fontSize: '0.875rem' }}>請於左側設定指令並上傳影片<br/>SOP 自動生成後將顯示於此，點擊步驟即可連動影片播放</p>
+                <p style={{ margin: 0, fontSize: '0.875rem' }}>請於左側設定指令並上傳影片<br />SOP 自動生成後將顯示於此，點擊步驟即可連動影片播放</p>
               </div>
             )}
           </div>
@@ -629,19 +621,73 @@ const App = () => {
         .spin { animation: spin 1s linear infinite; }
         @keyframes spin { 100% { transform: rotate(360deg); } }
         
-        /* PDF 匯出專用樣式 */
-        #sop-report-content.pdf-exporting {
-          background: white !important;
-          padding: 20px !important;
-          color: black !important;
-        }
-        #sop-report-content.pdf-exporting .btn-export, 
-        #sop-report-content.pdf-exporting .btn-edit-trigger {
-          display: none !important;
-        }
-        #sop-report-content.pdf-exporting .sop-hero {
-          box-shadow: none !important;
-          border-radius: 12px !important;
+        /* 列印/PDF 匯出專用樣式 */
+        @media print {
+          /* 強制保留背景顏色與漸層 */
+          * {
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
+          }
+          
+          body {
+            background: white !important;
+            color: black;
+          }
+
+          /* 隱藏不需要的 UI 元素 */
+          .glass-header, 
+          .left-panel, 
+          footer, 
+          .export-menu-container, 
+          .btn-edit-trigger, 
+          .edit-form,
+          .empty-state {
+            display: none !important;
+          }
+
+          /* 重置佈局以適應紙張 */
+          .main-layout {
+            display: block !important;
+            padding: 0 !important;
+            margin: 0 !important;
+          }
+          
+          .right-panel {
+            width: 100% !important;
+          }
+
+          .glass-panel {
+            box-shadow: none !important;
+            border: none !important;
+            padding: 0 !important;
+            background: transparent !important;
+            backdrop-filter: none !important;
+          }
+
+          /* 確保卡片不會被跨頁切斷 */
+          .step-card-wrapper {
+            break-inside: avoid;
+            page-break-inside: avoid;
+            margin-bottom: 24px !important;
+          }
+          
+          .part-section {
+            break-inside: avoid;
+            page-break-inside: avoid;
+          }
+
+          /* 美化列印卡片 */
+          .step-card {
+            box-shadow: 0 4px 15px rgba(0,0,0,0.05) !important;
+            border: 1px solid #e2e8f0 !important;
+          }
+          
+          .sop-hero {
+            box-shadow: none !important;
+            border-radius: 16px !important;
+            padding: 2rem !important;
+            margin-bottom: 2rem !important;
+          }
         }
       `}</style>
     </div>
